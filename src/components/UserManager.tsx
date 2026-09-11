@@ -2,19 +2,12 @@ import React, { useState, useEffect } from "react";
 import { User, UserRole } from "../types";
 import { supabase } from "../lib/supabaseClient";
 import {
-  Plus,
-  Edit2,
-  Trash2,
   UserCheck,
   UserX,
   Shield,
-  Key,
   User as UserIcon,
-  Check,
   X,
-  Settings,
   Loader2,
-  KeyRound,
   AlertCircle,
   CheckCircle2,
 } from "lucide-react";
@@ -26,17 +19,7 @@ interface UserManagerProps {
 export const UserManager: React.FC<UserManagerProps> = ({ currentUser }) => {
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingUser, setEditingUser] = useState<User | null>(null);
 
-  // State untuk modal Reset Password Langsung
-  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
-  const [resetTargetUser, setResetTargetUser] = useState<User | null>(null);
-  const [newPassword, setNewPassword] = useState("");
-  const [isResetting, setIsResetting] = useState(false);
-
-  // State untuk Toast Notifikasi Modern
   const [notification, setNotification] = useState<{
     show: boolean;
     type: "success" | "error";
@@ -50,21 +33,6 @@ export const UserManager: React.FC<UserManagerProps> = ({ currentUser }) => {
     }, 4000);
   };
 
-  const [formData, setFormData] = useState<{
-    name: string;
-    username: string;
-    password: string;
-    role: UserRole;
-    active: boolean;
-  }>({
-    name: "",
-    username: "",
-    password: "",
-    role: "cashier",
-    active: true,
-  });
-
-  // 1. Ambil data users dari Supabase
   const fetchUsers = async () => {
     try {
       setIsLoading(true);
@@ -84,7 +52,6 @@ export const UserManager: React.FC<UserManagerProps> = ({ currentUser }) => {
     }
   };
 
-  // 2. Load data & Aktifkan Supabase Realtime Listener
   useEffect(() => {
     fetchUsers();
 
@@ -104,153 +71,6 @@ export const UserManager: React.FC<UserManagerProps> = ({ currentUser }) => {
     };
   }, []);
 
-  const handleOpenAddModal = () => {
-    setEditingUser(null);
-    setFormData({
-      name: "",
-      username: "",
-      password: "",
-      role: "cashier",
-      active: true,
-    });
-    setIsModalOpen(true);
-  };
-
-  const handleOpenEditModal = (user: User) => {
-    setEditingUser(user);
-    setFormData({
-      name: user.name,
-      username: user.username,
-      password: "",
-      role: user.role,
-      active: user.active ?? true,
-    });
-    setIsModalOpen(true);
-  };
-
-  const handleOpenResetModal = (user: User) => {
-    setResetTargetUser(user);
-    setNewPassword("");
-    setIsResetModalOpen(true);
-  };
-
-  const sanitizeEmail = (input: string, role: UserRole): string => {
-    const clean = input.trim().toLowerCase();
-    if (clean.includes("@")) return clean;
-    const domainMap: Record<UserRole, string> = {
-      owner: "owner.co",
-      admin: "admin.co",
-      cashier: "kasir.co",
-    };
-    return `${clean}@${domainMap[role] || "kasir.co"}`;
-  };
-
-  // 3. Simpan / Tambah / Update Data Pengguna (Dilindungi Anti-Spam / Double Click)
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (isSubmitting) return; // Mencegah klik beruntun penyebab error 429
-    setIsSubmitting(true);
-
-    try {
-      if (editingUser) {
-        const updatePayload: Partial<User> = {
-          name: formData.name,
-          username: formData.username,
-          role: formData.role,
-          active: formData.active,
-        };
-
-        const { error } = await supabase
-          .from("users")
-          .update(updatePayload)
-          .eq("id", editingUser.id);
-
-        if (error) throw error;
-        showNotification("success", "Data pengguna berhasil diperbarui!");
-      } else {
-        const sanitizedEmail = sanitizeEmail(formData.username, formData.role);
-
-        const { data: existingUser } = await supabase
-          .from("users")
-          .select("id")
-          .eq("username", formData.username)
-          .maybeSingle();
-
-        if (existingUser) {
-          throw new Error(`Username "${formData.username}" sudah terdaftar.`);
-        }
-
-        const { data: authData, error: authError } = await supabase.auth.signUp(
-          {
-            email: sanitizedEmail,
-            password: formData.password,
-            options: {
-              data: {
-                name: formData.name,
-                username: formData.username,
-                role: formData.role,
-              },
-            },
-          },
-        );
-
-        if (authError) throw authError;
-
-        if (!authData.user || authData.user.identities?.length === 0) {
-          throw new Error(`Email "${sanitizedEmail}" sudah terdaftar di Auth.`);
-        }
-
-        const { error: profileError } = await supabase.from("users").insert([
-          {
-            auth_id: authData.user.id,
-            name: formData.name,
-            username: formData.username,
-            role: formData.role,
-            active: formData.active,
-          },
-        ]);
-
-        if (profileError) throw profileError;
-        showNotification("success", "Pengguna baru berhasil ditambahkan!");
-      }
-
-      setIsModalOpen(false);
-      await fetchUsers();
-    } catch (err: any) {
-      showNotification("error", err.message || "Terjadi kesalahan.");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  // 4. Eksekusi Reset Password Langsung via RPC
-  const handleExecuteResetPassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!resetTargetUser || !newPassword || isResetting) return;
-    setIsResetting(true);
-
-    try {
-      const { error } = await supabase.rpc("admin_reset_user_password", {
-        new_password: newPassword,
-        target_user_id: resetTargetUser.auth_id || resetTargetUser.id,
-      });
-
-      if (error) throw error;
-
-      showNotification(
-        "success",
-        `Password akun "${resetTargetUser.name}" berhasil diubah!`,
-      );
-      setIsResetModalOpen(false);
-      setNewPassword("");
-    } catch (err: any) {
-      showNotification("error", "Gagal mereset password: " + err.message);
-    } finally {
-      setIsResetting(false);
-    }
-  };
-
-  // 5. Ubah Status Aktif/Non-Aktif
   const toggleUserStatus = async (user: User) => {
     try {
       const { error } = await supabase
@@ -266,24 +86,8 @@ export const UserManager: React.FC<UserManagerProps> = ({ currentUser }) => {
     }
   };
 
-  // 6. Hapus Pengguna
-  const handleDeleteUser = async (userId: string) => {
-    if (!window.confirm("Apakah Anda yakin ingin menghapus pengguna ini?"))
-      return;
-
-    try {
-      const { error } = await supabase.from("users").delete().eq("id", userId);
-      if (error) throw error;
-      showNotification("success", "Pengguna berhasil dihapus.");
-      await fetchUsers();
-    } catch (err: any) {
-      showNotification("error", "Gagal menghapus pengguna: " + err.message);
-    }
-  };
-
   return (
     <div className="space-y-6 relative">
-      {/* TOAST NOTIFIKASI MODERN */}
       {notification.show && (
         <div className="fixed top-5 right-5 z-50 animate-bounce duration-300">
           <div
@@ -311,28 +115,6 @@ export const UserManager: React.FC<UserManagerProps> = ({ currentUser }) => {
         </div>
       )}
 
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl shadow-xs border border-slate-200/85">
-        <div>
-          <h2 className="text-base font-extrabold text-slate-800 tracking-tight flex items-center gap-2">
-            <UserIcon size={18} className="text-orange-500" />
-            Manajemen Pengguna
-          </h2>
-          <p className="text-xs text-slate-500 mt-1">
-            Kelola akun, akses role pengguna dan status aktivasi secara
-            realtime.
-          </p>
-        </div>
-
-        <button
-          onClick={handleOpenAddModal}
-          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-orange-500 hover:bg-orange-600 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-orange-500/20 cursor-pointer active:scale-95 shrink-0"
-        >
-          <Plus size={16} />
-          <span>Tambah Pengguna Baru</span>
-        </button>
-      </div>
-
-      {/* TABEL PENGGUNA */}
       <div className="bg-white rounded-2xl shadow-xs border border-slate-200/80 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs">
@@ -342,13 +124,12 @@ export const UserManager: React.FC<UserManagerProps> = ({ currentUser }) => {
                 <th className="py-3.5 px-4">Username</th>
                 <th className="py-3.5 px-4">Role / Akses</th>
                 <th className="py-3.5 px-4">Status</th>
-                <th className="py-3.5 px-4 text-right">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
               {isLoading ? (
                 <tr>
-                  <td colSpan={5} className="py-8 text-center text-slate-400">
+                  <td colSpan={4} className="py-8 text-center text-slate-400">
                     <div className="flex items-center justify-center gap-2">
                       <Loader2
                         size={16}
@@ -360,7 +141,7 @@ export const UserManager: React.FC<UserManagerProps> = ({ currentUser }) => {
                 </tr>
               ) : users.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="py-8 text-center text-slate-400">
+                  <td colSpan={4} className="py-8 text-center text-slate-400">
                     Belum ada data pengguna.
                   </td>
                 </tr>
@@ -439,36 +220,6 @@ export const UserManager: React.FC<UserManagerProps> = ({ currentUser }) => {
                           )}
                         </button>
                       </td>
-
-                      <td className="py-3 px-4 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            onClick={() => handleOpenResetModal(user)}
-                            className="p-1.5 text-amber-600 hover:text-amber-800 hover:bg-amber-50 rounded-lg transition-colors cursor-pointer"
-                            title="Ganti Password Langsung"
-                          >
-                            <KeyRound size={15} />
-                          </button>
-
-                          <button
-                            onClick={() => handleOpenEditModal(user)}
-                            className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-                            title="Edit User"
-                          >
-                            <Edit2 size={15} />
-                          </button>
-
-                          {!isSelf && (
-                            <button
-                              onClick={() => handleDeleteUser(user.id)}
-                              className="p-1.5 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
-                              title="Hapus User"
-                            >
-                              <Trash2 size={15} />
-                            </button>
-                          )}
-                        </div>
-                      </td>
                     </tr>
                   );
                 })
@@ -477,218 +228,6 @@ export const UserManager: React.FC<UserManagerProps> = ({ currentUser }) => {
           </table>
         </div>
       </div>
-
-      {/* MODAL RESET PASSWORD LANGSUNG */}
-      {isResetModalOpen && resetTargetUser && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-100">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-4">
-              <h3 className="font-extrabold text-slate-800 text-sm flex items-center gap-2">
-                <KeyRound size={16} className="text-amber-500" />
-                Ganti Password Pengguna
-              </h3>
-              <button
-                onClick={() => setIsResetModalOpen(false)}
-                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 cursor-pointer"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <p className="text-xs text-slate-500 mb-4">
-              Masukkan password baru untuk pengguna{" "}
-              <strong className="text-slate-700">
-                {resetTargetUser.name}
-              </strong>{" "}
-            </p>
-
-            <form onSubmit={handleExecuteResetPassword} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Password Baru
-                </label>
-                <div className="relative">
-                  <input
-                    type="password"
-                    required
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    placeholder="Masukkan password baru"
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-hidden focus:border-orange-500 focus:bg-white pl-8"
-                  />
-                  <Key
-                    size={14}
-                    className="absolute left-2.5 top-2.5 text-slate-400"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsResetModalOpen(false)}
-                  className="py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors cursor-pointer"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  disabled={isResetting}
-                  className="py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl text-xs transition-colors shadow-md shadow-amber-500/20 cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-70"
-                >
-                  {isResetting ? (
-                    <Loader2 size={14} className="animate-spin" />
-                  ) : (
-                    <Check size={14} />
-                  )}
-                  <span>{isResetting ? "Menyimpan..." : "Simpan"}</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL TAMBAH / EDIT USER */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-4">
-              <h3 className="font-extrabold text-slate-800 text-sm flex items-center gap-2">
-                <UserIcon size={16} className="text-orange-500" />
-                {editingUser ? "Edit Data Pengguna" : "Tambah Pengguna Baru"}
-              </h3>
-              <button
-                onClick={() => setIsModalOpen(false)}
-                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 cursor-pointer"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Nama Lengkap
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={formData.name}
-                  onChange={(e) =>
-                    setFormData({ ...formData, name: e.target.value })
-                  }
-                  placeholder="Gusti Panengah"
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-hidden focus:border-orange-500 focus:bg-white"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Username / Email
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={formData.username}
-                  onChange={(e) =>
-                    setFormData({ ...formData, username: e.target.value })
-                  }
-                  placeholder="gustipanengah"
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-hidden focus:border-orange-500 focus:bg-white"
-                />
-              </div>
-
-              {!editingUser && (
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Password
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="password"
-                      required
-                      value={formData.password}
-                      onChange={(e) =>
-                        setFormData({ ...formData, password: e.target.value })
-                      }
-                      placeholder="Buat password"
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-hidden focus:border-orange-500 focus:bg-white pl-8"
-                    />
-                    <Key
-                      size={14}
-                      className="absolute left-2.5 top-2.5 text-slate-400"
-                    />
-                  </div>
-                </div>
-              )}
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Role
-                </label>
-                <select
-                  value={formData.role}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      role: e.target.value as UserRole,
-                    })
-                  }
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold focus:outline-hidden focus:border-orange-500 focus:bg-white cursor-pointer"
-                >
-                  <option value="cashier">Kasir</option>
-                  <option value="admin">Admin</option>
-                  <option value="owner">Owner</option>
-                </select>
-              </div>
-
-              <div className="flex items-center justify-between pt-2">
-                <span className="text-xs font-bold text-slate-700">
-                  Status Akun Active
-                </span>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setFormData({ ...formData, active: !formData.active })
-                  }
-                  className={`w-12 h-6 flex items-center rounded-full p-1 transition-colors cursor-pointer ${
-                    formData.active ? "bg-orange-500" : "bg-slate-300"
-                  }`}
-                >
-                  <div
-                    className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
-                      formData.active ? "translate-x-6" : "translate-x-0"
-                    }`}
-                  />
-                </button>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3 pt-4 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors cursor-pointer"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl text-xs transition-colors shadow-md shadow-orange-500/20 cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-70"
-                >
-                  {isSubmitting ? (
-                    <Loader2 size={14} className="animate-spin" />
-                  ) : (
-                    <Check size={14} />
-                  )}
-                  <span>{isSubmitting ? "Menyimpan..." : "Simpan"}</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

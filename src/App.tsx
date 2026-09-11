@@ -554,7 +554,7 @@ export default function App() {
                     </button>
                   )}
 
-                  {["owner", "admin", "cashier"].includes(currentUser.role) && (
+                  {["owner"].includes(currentUser.role) && (
                     <button
                       onClick={() => {
                         setActiveTab("analytics");
@@ -865,9 +865,7 @@ export default function App() {
                         </button>
                       )}
 
-                      {["owner", "admin", "cashier"].includes(
-                        currentUser.role,
-                      ) && (
+                      {["owner"].includes(currentUser.role) && (
                         <button
                           onClick={() => {
                             setActiveTab("analytics");

@@ -17,7 +17,7 @@ interface LoginProps {
 }
 
 export default function Login({ storeSettings, onLoginSuccess }: LoginProps) {
-  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -28,21 +28,35 @@ export default function Login({ storeSettings, onLoginSuccess }: LoginProps) {
     setErrorMessage(null);
 
     try {
-      const inputUsername = username.trim().toLowerCase();
-      const dummyEmail = inputUsername.includes("@")
-        ? inputUsername
-        : `${inputUsername}@kasirpintar.local`;
+      const inputEmail = email.trim().toLowerCase();
 
+      // 1. Cek terlebih dahulu di tabel 'users' apakah email terdaftar dan statusnya aktif/non-aktif
+      // Catatan: Pastikan tabel 'users' memiliki kolom 'email'. Jika di database menggunakan kolom lain seperti 'username' untuk menyimpan email, sesuaikan kuerinya.
+      const { data: existingProfile, error: profileCheckError } = await supabase
+        .from("users")
+        .select("*")
+        .eq("email", inputEmail)
+        .maybeSingle();
+
+      // Jika profil ditemukan dan statusnya non-aktif, langsung tolak login
+      if (existingProfile && existingProfile.active === false) {
+        throw new Error(
+          "Akun Anda telah dinonaktifkan. Silakan hubungi Admin.",
+        );
+      }
+
+      // 2. Lakukan autentikasi langsung menggunakan Supabase Auth Email & Password
       const { data, error } = await supabase.auth.signInWithPassword({
-        email: dummyEmail,
+        email: inputEmail,
         password: password,
       });
 
       if (error) {
-        throw new Error("Username atau password salah!");
+        throw new Error("Email atau password salah!");
       }
 
       if (data.user) {
+        // Ambil data profil lengkap berdasarkan auth_id atau email
         let { data: profile } = await supabase
           .from("users")
           .select("*")
@@ -50,22 +64,26 @@ export default function Login({ storeSettings, onLoginSuccess }: LoginProps) {
           .maybeSingle();
 
         if (!profile) {
-          const { data: profileByUsername } = await supabase
+          const { data: profileByEmail } = await supabase
             .from("users")
             .select("*")
-            .eq("username", username.trim())
+            .eq("email", inputEmail)
             .maybeSingle();
 
-          profile = profileByUsername;
+          profile = profileByEmail;
         }
 
+        // Pengecekan ganda status aktif setelah sesi auth berhasil dibuat
         if (profile && profile.active === false) {
-          throw new Error("Akun Anda dinonaktifkan. Silakan hubungi Admin.");
+          await supabase.auth.signOut(); // Putus sesi otomatis
+          throw new Error(
+            "Akun Anda telah dinonaktifkan. Silakan hubungi Admin.",
+          );
         }
 
         const loggedUser: User = {
           id: profile?.id || data.user.id,
-          username: profile?.username || username,
+          username: profile?.username || inputEmail.split("@")[0],
           name: profile?.name || data.user.user_metadata?.name || "User",
           role: profile?.role || data.user.user_metadata?.role || "cashier",
           active: profile?.active ?? true,
@@ -122,10 +140,10 @@ export default function Login({ storeSettings, onLoginSuccess }: LoginProps) {
                 size={16}
               />
               <input
-                type="text"
+                type="email"
                 required
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
                 placeholder="nama@email.com"
                 className="w-full pl-10 pr-4 py-2.5 sm:py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-medium text-slate-800 placeholder:text-slate-400 focus:outline-none focus:bg-white focus:border-orange-500 focus:ring-2 focus:ring-orange-500/15 transition-all"
               />
